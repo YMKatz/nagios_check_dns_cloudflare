@@ -12,10 +12,18 @@ import (
 	"github.com/ymkatz/nagios_check_dns_cloudflare/internal/dns"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
+)
+
 var f = flags.New()
 
 func init() {
 	f.NewBoolFlag("help", "h", "Print detailed help")
+	f.NewBoolFlag("version", "V", "Print the version information")
 	f.NewStringFlag("hostname", "H", "The name to query")
 	f.NewStringFlag("dns-server", "s", "The DNS server to query. Cannot be used with --only-api")
 	f.NewBoolFlag("only-dns", "d", "Only do the DNS part of the check. Cannot be used with --only-api")
@@ -37,6 +45,16 @@ func main() {
 	err := f.Parse(os.Args...)
 	if err != nil {
 		check.Unknownf("Invalid command line arguments provided. %s", err)
+	}
+
+	if f.IsSet("help") {
+		fmt.Println(f.ShowUsage(4))
+		os.Exit(0)
+	}
+
+	if f.IsSet("version") {
+		fmt.Printf("check_dns_cloudflare %s, commit %s, built at %s by %s\n", version, commit, date, builtBy)
+		os.Exit(0)
 	}
 
 	onlyDNS := f.Bool("only-dns")
