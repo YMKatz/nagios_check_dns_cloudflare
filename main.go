@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudflare/cloudflare-go"
@@ -195,13 +200,126 @@ func main() {
 
 	// Now do the DNS checks
 	if !onlyAPI {
+		path, err := exec.LookPath("dig")
+		if err != nil {
+			check.Unknownf("Could not find 'dig' command on PATH")
+		}
+
+		args := []string{"+short"}
+
+		if f.IsSet("timeout") {
+			args = append(args, "+time="+strconv.Itoa(f.Int("timeout")))
+		}
+
+		if f.IsSet("dns-server") {
+			args = append(args, "@"+f.String("dns-server"))
+		}
+
 		if isProxied {
-			// Always do A and AAAA lookups and make sure they are inside the CF IP ranges
-			// TODO: Implement
+			// Do A and AAAA lookups and make sure they are inside the CF IP ranges
+			// NOTE: Requires `DiG 9.x` for "Multiple Query" support
+			args = append(args, hostname, "-t", "A", hostname, "-t", "AAAA")
+
+			results, err := runCommand(path, args)
+			if err != nil {
+				check.Unknownf("Error running dig: %s", err)
+			}
+
+			if len(results) == 0 {
+				check.Criticalf("No DNS A+AAAA records found")
+			}
+
+			for _, ipStr := range results {
+				ip := net.ParseIP(ipStr)
+				if ip == nil {
+					check.AddResultf(nagiosplugin.CRITICAL, "Failed to parse IP `%s`", ipStr)
+				} else {
+					found := false
+					if ip.To4() == nil {
+						for _, cidr := range c.PublicCIDRsV6 {
+							if cidr.Contains(ip) {
+								found = true
+								break
+							}
+						}
+					} else {
+						for _, cidr := range c.PublicCIDRsV4 {
+							if cidr.Contains(ip) {
+								found = true
+								break
+							}
+						}
+					}
+
+					if !found {
+						check.AddResultf(nagiosplugin.CRITICAL, "IP `%s` does not belong to CloudFlare", ipStr)
+					}
+				}
+			}
+			// NOTE: We can add an "OK" here unconditionally because a CRITICAL will override it.
+			check.AddResultf(nagiosplugin.OK, "Results: %s", strings.Join(results, ","))
 		} else {
 			// Do a regular DNS check
-			// TODO: Implement
+			args = append(args, hostname, "-t", queryType)
+
+			results, err := runCommand(path, args)
+			if err != nil {
+				check.Unknownf("Error running dig: %s", err)
+			}
+
+			if len(expectedRaw) > 0 {
+				if Equal(results, expectedRaw) {
+					check.AddResultf(nagiosplugin.OK, "Results: %s", strings.Join(results, ","))
+				} else {
+					check.AddResultf(nagiosplugin.CRITICAL, "DNS lookup result different from expected\nExpected:\t%s\nGot:\t%s", expectedRaw, strings.Join(results, ","))
+				}
+			} else {
+				check.AddResultf(nagiosplugin.OK, "Results: %s", strings.Join(results, ","))
+			}
 		}
 	}
 
+}
+
+func runCommand(path string, args []string) ([]string, error) {
+	fmt.Fprintf(os.Stderr, "Executing `%s %s`\n", path, strings.Join(args, " "))
+	cmd := exec.Command(path, args...)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	results := strings.Split(strings.ReplaceAll(out.String(), "\r\n", "\n"), "\n")
+
+	// If there is a blank last element, remove it
+	if len(results) > 1 && len(results[len(results)-1]) == 0 {
+		results = results[:len(results)-1]
+	}
+
+	for i := range results {
+		s := results[i]
+		sz := len(s)
+		if sz > 0 && s[sz-1] == '.' {
+			results[i] = s[:sz-1]
+		}
+	}
+	sort.Strings(results)
+
+	return results, nil
+}
+
+func Equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
 }
