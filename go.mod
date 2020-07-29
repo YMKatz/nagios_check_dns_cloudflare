@@ -9,6 +9,7 @@ require (
 	github.com/olorin/nagiosplugin v1.2.0
 	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/peterbourgon/diskv/v3 v3.0.0
+	github.com/pkg/profile v1.5.0
 	github.com/simonleung8/flags v0.0.0-20170704170018-8020ed7bcf1a
 	golang.org/x/net v0.0.0-20200707034311-ab3426394381
 	golang.org/x/sys v0.0.0-20200724161237-0e2f3a69832c

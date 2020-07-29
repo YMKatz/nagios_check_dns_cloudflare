@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/olorin/nagiosplugin"
+	"github.com/pkg/profile"
 	"github.com/simonleung8/flags"
 	"github.com/ymkatz/nagios_check_dns_cloudflare/internal/cache"
 	"github.com/ymkatz/nagios_check_dns_cloudflare/internal/dns"
@@ -41,13 +42,26 @@ func init() {
 	// TODO: Do we need these from the original check_dns?
 	// fc.NewBoolFlag("expect-authority", "A", "Optionally expect the DNS server to be authoritative for the lookup")
 	// fc.NewBoolFlag("accept-cname", "n", "Optionally accept cname responses as a valid result to a query\nThe default is to ignore cname responses as part of the result")
+	f.NewBoolFlag("cpuprofile", "", "")
+	f.NewBoolFlag("memprofile", "", "")
 }
 
 func main() {
+	err := f.Parse(os.Args...)
+
+	var memP interface{ Stop() }
+	if f.IsSet("cpuprofile") {
+		cwd, _ := os.Getwd()
+		defer profile.Start(profile.CPUProfile, profile.ProfilePath(cwd)).Stop()
+	}
+	if f.IsSet("memprofile") {
+		cwd, _ := os.Getwd()
+		memP = profile.Start(profile.MemProfile, profile.ProfilePath(cwd))
+	}
+
 	check := nagiosplugin.NewCheck()
 	defer check.Finish()
 
-	err := f.Parse(os.Args...)
 	if err != nil {
 		check.Unknownf("Invalid command line arguments provided. %s", err)
 	}
@@ -279,6 +293,9 @@ func main() {
 		}
 	}
 
+	if memP != nil {
+		memP.Stop()
+	}
 }
 
 func runCommand(path string, args []string) ([]string, error) {
