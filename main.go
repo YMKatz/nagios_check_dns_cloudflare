@@ -61,7 +61,7 @@ func main() {
 	}
 
 	check := nagiosplugin.NewCheck()
-	// defer check.Finish()
+	defer check.Finish()
 
 	if err != nil {
 		check.Unknownf("Invalid command line arguments provided. %s", err)
