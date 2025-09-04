@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -10,7 +11,10 @@ import (
 	"time"
 
 	errors "emperror.dev/errors"
-	"github.com/cloudflare/cloudflare-go"
+	"github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/dns"
+	"github.com/cloudflare/cloudflare-go/v6/ips"
+	"github.com/cloudflare/cloudflare-go/v6/zones"
 	"github.com/hashicorp/go-multierror"
 	"github.com/peterbourgon/diskv/v3"
 )
@@ -52,7 +56,7 @@ func GetCache(path string) (*CFCache, error) {
 	}, nil
 }
 
-func (c *CFCache) LoadCloudflareIPList() error {
+func (c *CFCache) LoadCloudflareIPList(client *cloudflare.Client) error {
 	exp, _ := c.cache.Read(keyCloudFlareIPRangesStaleAfter)
 	var expires time.Time
 	err := expires.UnmarshalBinary(exp)
@@ -86,15 +90,15 @@ func (c *CFCache) LoadCloudflareIPList() error {
 	_ = c.cache.Erase(keyCloudFlareIPRangesV4)
 	_ = c.cache.Erase(keyCloudFlareIPRangesV6)
 
-	cfResp, err := cloudflare.IPs()
+	cfResp, err := client.IPs.List(context.Background(), ips.IPListParams{})
 	if err != nil {
 		return errors.Wrap(err, "Unable to query Cloudflare for public IPs")
 	}
-	c.PublicCIDRsV4, err = parseIPNetList(cfResp.IPv4CIDRs)
+	c.PublicCIDRsV4, err = parseIPNetList(cfResp.IPV4CIDRs.([]string))
 	if err != nil {
 		return errors.Wrap(err, "Unable to parse Cloudflare IPv4 CIDRs")
 	}
-	c.PublicCIDRsV6, err = parseIPNetList(cfResp.IPv6CIDRs)
+	c.PublicCIDRsV6, err = parseIPNetList(cfResp.IPV6CIDRs.([]string))
 	if err != nil {
 		return errors.Wrap(err, "Unable to parse Cloudflare IPv6 CIDRs")
 	}
@@ -126,13 +130,13 @@ func parseIPNetList(strs []string) ([]*net.IPNet, error) {
 	return ips, errs.ErrorOrNil()
 }
 
-func (c *CFCache) GetCFZoneDNS(cfAPI *cloudflare.API, domain string) ([]cloudflare.DNSRecord, error) {
+func (c *CFCache) GetCFZoneDNS(cfAPI *cloudflare.Client, domain string) ([]dns.RecordResponse, error) {
 	domainKey := strings.ReplaceAll(domain, ".", "_")
 	exp, _ := c.cache.Read(keyPrefixCloudflareZoneStaleAfter + domainKey)
 	var expires time.Time
 	err := expires.UnmarshalBinary(exp)
 
-	var records []cloudflare.DNSRecord
+	var records []dns.RecordResponse
 
 	// If we had an unmarshalling error, just assume we don't have cached data
 	// If it is expired, clear it
@@ -151,15 +155,26 @@ func (c *CFCache) GetCFZoneDNS(cfAPI *cloudflare.API, domain string) ([]cloudfla
 	_ = c.cache.Erase(keyPrefixCloudflareZone + domainKey)
 	_ = c.cache.Erase(keyPrefixCloudflareDNS + domainKey)
 
-	zoneId, err := cfAPI.ZoneIDByName(domain)
+	zones, err := cfAPI.Zones.List(context.Background(), zones.ZoneListParams{
+		Name: cloudflare.F(domain),
+	})
 	if err != nil {
 		return nil, errors.Wrap(err, "Unable to query Cloudflare Zone ID for domain")
 	}
+	if len(zones.Result) != 1 {
+		return nil, fmt.Errorf("Unable to find Cloudflare Zone ID for domain - result length: %d", len(zones.Result))
+	}
+	zoneId := zones.Result[0].ID
 
 	_ = c.cache.WriteString(keyPrefixCloudflareZone+domainKey, zoneId)
 
-	records, err = cfAPI.DNSRecords(zoneId, cloudflare.DNSRecord{})
-	if err != nil {
+	recordPager := cfAPI.DNS.Records.ListAutoPaging(context.Background(), dns.RecordListParams{
+		ZoneID: cloudflare.String(zoneId),
+	})
+	for recordPager.Next() {
+		records = append(records, recordPager.Current())
+	}
+	if err := recordPager.Err(); err != nil {
 		return nil, errors.Wrap(err, "Unable to query Cloudflare for DNS records")
 	}
 

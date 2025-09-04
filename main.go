@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudflare/cloudflare-go"
+	"github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/option"
 	"github.com/olorin/nagiosplugin"
 	"github.com/pkg/profile"
 	"github.com/simonleung8/flags"
@@ -60,7 +61,7 @@ func main() {
 	}
 
 	check := nagiosplugin.NewCheck()
-	defer check.Finish()
+	// defer check.Finish()
 
 	if err != nil {
 		check.Unknownf("Invalid command line arguments provided. %s", err)
@@ -134,7 +135,6 @@ func main() {
 	isProxied := false
 
 	if !onlyDNS {
-		var cfAPI *cloudflare.API
 		var cfZone string
 
 		cfToken, found := os.LookupEnv("CLOUDFLARE_API_TOKEN")
@@ -142,14 +142,13 @@ func main() {
 			check.Unknownf("You must set the CLOUDFLARE_API_TOKEN variable")
 		}
 
-		err := c.LoadCloudflareIPList()
+		cfAPI := cloudflare.NewClient(
+			option.WithAPIToken(cfToken),
+		)
+
+		err := c.LoadCloudflareIPList(cfAPI)
 		if err != nil {
 			check.Unknownf("Unable to load list of Cloudflare public IPs")
-		}
-
-		cfAPI, err = cloudflare.NewWithAPIToken(cfToken)
-		if err != nil {
-			check.Criticalf("Unable to create Cloudflare API client")
 		}
 
 		if f.IsSet("zone") {
@@ -169,7 +168,7 @@ func main() {
 			if r.Name == hostname {
 				// If we are filtering by query type, skip if this is the wrong type
 				// If we are not filtering by query type, the types we care about are A, AAAA, and CNAME
-				if (len(queryType) > 0 && r.Type != queryType) || (r.Type != "A" && r.Type != "AAAA" && r.Type != "CNAME") {
+				if (len(queryType) > 0 && string(r.Type) != queryType) || (r.Type != "A" && r.Type != "AAAA" && r.Type != "CNAME") {
 					continue
 				}
 
