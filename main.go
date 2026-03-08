@@ -30,6 +30,7 @@ var f = flags.New()
 
 func init() {
 	f.NewBoolFlag("help", "h", "Print detailed help")
+	f.NewBoolFlag("debug", "", "Print verbose debug output")
 	f.NewBoolFlag("version", "V", "Print the version information")
 	f.NewStringFlag("hostname", "H", "The name to query")
 	f.NewStringFlag("dns-server", "s", "The DNS server to query. Cannot be used with --only-api")
@@ -77,6 +78,8 @@ func main() {
 		os.Exit(0)
 	}
 
+	verbose := f.IsSet("debug")
+
 	onlyDNS := f.Bool("only-dns")
 	onlyAPI := f.Bool("only-api")
 
@@ -91,6 +94,8 @@ func main() {
 		c, err = cache.GetCache(f.String("cache-path"))
 		if err != nil {
 			check.Unknownf("Unwriteable cache path provided: %s", err.Error())
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Using cache from path '%s'\n", f.String("cache-path"))
 		}
 	} else {
 		cachePath, found := os.LookupEnv("NAGIOS_PLUGIN_STATE_DIRECTORY")
@@ -99,18 +104,24 @@ func main() {
 			c, err = cache.GetCache(cachePath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error trying NAGIOS_PLUGIN_STATE_DIRECTORY: %s\n", err)
+			} else if verbose {
+				fmt.Fprintf(os.Stderr, "Using cache from path '%s' (ENV)\n", cachePath)
 			}
 		}
 		if c == nil {
 			c, err = cache.GetCache("/usr/local/nagios/var/")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error trying /usr/local/nagios/var/: %s\n", err)
+			} else if verbose {
+				fmt.Fprintf(os.Stderr, "Using cache from path '%s'\n", "/usr/local/nagios/var/")
 			}
 		}
 		if c == nil {
 			c, err = cache.GetCache(os.TempDir())
 			if err != nil {
 				check.Unknownf("Unable to determine a usable cache path. Please provide one. Error: %s", err)
+			} else if verbose {
+				fmt.Fprintf(os.Stderr, "Using cache from path '%s' (TEMP)\n", os.TempDir())
 			}
 		}
 	}
@@ -126,9 +137,15 @@ func main() {
 		if strings.Contains(e, ",") {
 			for _, e2 := range strings.Split(e, ",") {
 				wantRecords[e2] = false
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Want record %s\n", e2)
+				}
 			}
 		} else {
 			wantRecords[e] = false
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Want record %s\n", e)
+			}
 		}
 	}
 
@@ -149,6 +166,8 @@ func main() {
 		err := c.LoadCloudflareIPList(cfAPI)
 		if err != nil {
 			check.Unknownf("Unable to load list of Cloudflare public IPs: %s", err.Error())
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Loaded CF IP list (from cache or fresh)\n")
 		}
 
 		if f.IsSet("zone") {
@@ -156,19 +175,30 @@ func main() {
 		} else {
 			cfZone = dns.GetDomainFromHostname(hostname)
 		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Checking CF Zone %s\n", cfZone)
+		}
 
 		records, err := c.GetCFZoneDNS(cfAPI, cfZone)
 		if err != nil {
 			check.Criticalf("Unable to query Cloudflare DNS records: %s", err.Error())
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Got CF Zone\n")
 		}
 
 		var foundRecord []string
 		for _, r := range records {
 			// fmt.Fprintf(os.Stderr, "RECORD: %v\n", r)
 			if r.Name == hostname {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Found record with matching name (%s; type %s)\n", r.Name, r.Type)
+				}
 				// If we are filtering by query type, skip if this is the wrong type
 				// If we are not filtering by query type, the types we care about are A, AAAA, and CNAME
 				if (len(queryType) > 0 && string(r.Type) != queryType) || (r.Type != "A" && r.Type != "AAAA" && r.Type != "CNAME") {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "Skipping type that is not what we need\n")
+					}
 					continue
 				}
 
@@ -180,12 +210,18 @@ func main() {
 
 				if len(wantRecords) > 0 {
 					if _, ok := wantRecords[r.Content]; ok {
+						if verbose {
+							fmt.Fprintf(os.Stderr, "Found record we want (%s)\n", r.Content)
+						}
 						wantRecords[r.Content] = true
 						foundRecord = append(foundRecord, r.Content)
 					} else {
 						check.AddResultf(nagiosplugin.CRITICAL, "Found unexpected DNS %s record: %s", r.Type, r.Content)
 					}
 				} else {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "Found any valid record (%s)\n", r.Content)
+					}
 					// If we don't expect a specific value, then any record is fine
 					foundRecord = append(foundRecord, r.Content)
 				}
