@@ -64,7 +64,7 @@ func main() {
 	defer check.Finish()
 
 	if err != nil {
-		check.Unknownf("Invalid command line arguments provided. %s", err)
+		check.Unknownf("Invalid command line arguments provided: %s", err)
 	}
 
 	if f.IsSet("help") {
@@ -90,7 +90,7 @@ func main() {
 	if f.IsSet("cache-path") {
 		c, err = cache.GetCache(f.String("cache-path"))
 		if err != nil {
-			check.Unknownf("Unwriteable cache path provided")
+			check.Unknownf("Unwriteable cache path provided: %s", err.Error())
 		}
 	} else {
 		cachePath, found := os.LookupEnv("NAGIOS_PLUGIN_STATE_DIRECTORY")
@@ -148,7 +148,7 @@ func main() {
 
 		err := c.LoadCloudflareIPList(cfAPI)
 		if err != nil {
-			check.Unknownf("Unable to load list of Cloudflare public IPs")
+			check.Unknownf("Unable to load list of Cloudflare public IPs: %s", err.Error())
 		}
 
 		if f.IsSet("zone") {
@@ -159,7 +159,7 @@ func main() {
 
 		records, err := c.GetCFZoneDNS(cfAPI, cfZone)
 		if err != nil {
-			check.Criticalf("Unable to query Cloudflare DNS records")
+			check.Criticalf("Unable to query Cloudflare DNS records: %s", err.Error())
 		}
 
 		var foundRecord []string
@@ -215,7 +215,7 @@ func main() {
 	if !onlyAPI {
 		path, err := exec.LookPath("dig")
 		if err != nil {
-			check.Unknownf("Could not find 'dig' command on PATH")
+			check.Unknownf("Could not find 'dig' command on PATH: %s", err.Error())
 		}
 
 		args := []string{"+short"}
