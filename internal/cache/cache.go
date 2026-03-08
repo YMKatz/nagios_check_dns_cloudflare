@@ -14,6 +14,7 @@ import (
 	"github.com/cloudflare/cloudflare-go/v6"
 	"github.com/cloudflare/cloudflare-go/v6/dns"
 	"github.com/cloudflare/cloudflare-go/v6/ips"
+	"github.com/cloudflare/cloudflare-go/v6/option"
 	"github.com/cloudflare/cloudflare-go/v6/zones"
 	"github.com/hashicorp/go-multierror"
 	"github.com/peterbourgon/diskv/v3"
@@ -156,9 +157,14 @@ func (c *CFCache) GetCFZoneDNS(ctx context.Context, cfAPI *cloudflare.Client, do
 	_ = c.cache.Erase(keyPrefixCloudflareZone + domainKey)
 	_ = c.cache.Erase(keyPrefixCloudflareDNS + domainKey)
 
-	zones, err := cfAPI.Zones.List(ctx, zones.ZoneListParams{
-		Name: cloudflare.F(domain),
-	})
+	fmt.Fprintf(os.Stderr, "Getting CF Zone ID from domain %s\n", domain)
+	zones, err := cfAPI.Zones.List(
+		ctx,
+		zones.ZoneListParams{
+			Name: cloudflare.F(domain),
+		},
+		option.WithRequestTimeout(5*time.Second),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to query Cloudflare Zone ID for domain: %w", err)
 	}
