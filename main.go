@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudflare/cloudflare-go/v6"
 	"github.com/cloudflare/cloudflare-go/v6/option"
@@ -50,6 +52,13 @@ func init() {
 
 func main() {
 	err := f.Parse(os.Args...)
+
+	ctx := context.Background()
+	if f.IsSet("timeout") {
+		newCtx, cancel := context.WithTimeout(ctx, time.Duration(f.Int("timeout"))*time.Second)
+		ctx = newCtx
+		defer cancel()
+	}
 
 	var memP interface{ Stop() }
 	if f.IsSet("memprofile") {
@@ -163,7 +172,7 @@ func main() {
 			option.WithAPIToken(cfToken),
 		)
 
-		err := c.LoadCloudflareIPList(cfAPI)
+		err := c.LoadCloudflareIPList(ctx, cfAPI)
 		if err != nil {
 			check.Unknownf("Unable to load list of Cloudflare public IPs: %s", err.Error())
 		} else if verbose {
@@ -179,7 +188,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Checking CF Zone %s\n", cfZone)
 		}
 
-		records, err := c.GetCFZoneDNS(cfAPI, cfZone)
+		records, err := c.GetCFZoneDNS(ctx, cfAPI, cfZone)
 		if err != nil {
 			check.Criticalf("Unable to query Cloudflare DNS records: %s", err.Error())
 		} else if verbose {
